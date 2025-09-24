@@ -7,16 +7,18 @@ import dev.sudu.userservicesept23.models.User;
 import dev.sudu.userservicesept23.repositories.RoleRepository;
 import dev.sudu.userservicesept23.repositories.TokenRepository;
 import dev.sudu.userservicesept23.repositories.UserRepository;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParser;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.MacAlgorithm;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.SecretKey;
 import java.time.Instant;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Service
 @Primary
@@ -26,12 +28,14 @@ public class UserServiceImpl implements UserService {
     private TokenRepository tokenRepository;
     private RoleRepository roleRepository;
     private BCryptPasswordEncoder bCryptPasswordEncoder;
+    private SecretKey secretKey;
 
-    public UserServiceImpl(UserRepository userRepository, TokenRepository tokenRepository, RoleRepository roleRepository, BCryptPasswordEncoder bCryptPasswordEncoder) {
+    public UserServiceImpl(UserRepository userRepository, TokenRepository tokenRepository, RoleRepository roleRepository, BCryptPasswordEncoder bCryptPasswordEncoder, SecretKey secretKey) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.roleRepository = roleRepository;
         this.bCryptPasswordEncoder = bCryptPasswordEncoder;
+        this.secretKey = secretKey;
     }
 
     @Override
@@ -68,18 +72,42 @@ public class UserServiceImpl implements UserService {
                 tokenRepository.saveAll(tokenList);
             }
 
-            Token newToken = new Token();
-            newToken.setToken(RandomStringUtils.randomAlphanumeric(128));
+//            Token newToken = new Token();
+//            newToken.setToken(RandomStringUtils.randomAlphanumeric(128));
+//
+//            Calendar calender = Calendar.getInstance();
+//            calender.add(Calendar.DAY_OF_YEAR, 30);
+//            newToken.setExpiryAt(calender.getTimeInMillis());
+//            newToken.setIsActive(true);
+//            newToken.setUser(optionalUser.get());
+//
+//            Token optionalToken = tokenRepository.save(newToken);
+//
+//            return optionalToken;
 
-            Calendar calender = Calendar.getInstance();
-            calender.add(Calendar.DAY_OF_YEAR, 30);
-            newToken.setExpiryAt(calender.getTimeInMillis());
-            newToken.setIsActive(true);
-            newToken.setUser(optionalUser.get());
+//            Generate a jwt token using jwt library
 
-            Token optionalToken = tokenRepository.save(newToken);
+            // payload
+            Map<String, Object> claims = new HashMap<>();
+            claims.put("iss", "sudu.com");
+            claims.put("userId", user.getId());
 
-            return optionalToken;
+            Calendar calendar = Calendar.getInstance();
+            calendar.add(Calendar.DAY_OF_YEAR, 30);
+            Long expiryDate = calendar.getTimeInMillis();
+            claims.put("expiryDate", expiryDate);
+            claims.put("roles", user.getRoles());
+
+//            // algo
+//            MacAlgorithm  macAlgorithm = Jwts.SIG.HS256;
+//
+//            // signature
+//            SecretKey secretKey = macAlgorithm.key().build();
+
+            String token = Jwts.builder().claims(claims).signWith(secretKey).compact();
+
+            Token savedToked = tokenRepository.save(Token.getBuilder().setToken(token).setExpiryAt(expiryDate).setIsActive(true).setUser(user).build());
+            return savedToked;
         }
 
         throw new PasswordMismatchException("Invalid user credentails");
@@ -87,23 +115,37 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Token validateToken(String token) throws InvalidTokenException {
+//        Optional<Token> optionalToken = tokenRepository.findByToken(token);
+//
+//        if(!optionalToken.isPresent()) {
+//            throw new InvalidTokenException("Invalid Token, pls login");
+//        }
+//
+//        Token returnedToken = optionalToken.get();
+//        if(!returnedToken.getIsActive()){
+//            return returnedToken;
+//        }
+//
+//        if(returnedToken.getExpiryAt() < new Date().getTime()){
+//            returnedToken.setIsActive(false);
+//            Token updatedToken = tokenRepository.save(returnedToken);
+//            return updatedToken;
+//        }
+//
+//        return optionalToken.get();
+
+        JwtParser jwtParser = Jwts.parser().verifyWith(secretKey).build();
+        Claims claims = jwtParser.parseSignedClaims(token).getPayload();
+
+        Long expiryDate = (Long) claims.get("expiryDate");
+
+        if(expiryDate < new Date().getTime()){
+            // token is invalid
+            throw new InvalidTokenException("Invalid token");
+        }
+
+        // Token is valid
         Optional<Token> optionalToken = tokenRepository.findByToken(token);
-
-        if(!optionalToken.isPresent()) {
-            throw new InvalidTokenException("Invalid Token, pls login");
-        }
-
-        Token returnedToken = optionalToken.get();
-        if(!returnedToken.getIsActive()){
-            return returnedToken;
-        }
-
-        if(returnedToken.getExpiryAt() < new Date().getTime()){
-            returnedToken.setIsActive(false);
-            Token updatedToken = tokenRepository.save(returnedToken);
-            return updatedToken;
-        }
-
         return optionalToken.get();
     }
 
